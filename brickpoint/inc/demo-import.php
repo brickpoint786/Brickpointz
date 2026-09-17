@@ -65,7 +65,15 @@ function brickpoint_setup_page() {
 			</form>
 		</div>
 		<div class="card" style="max-width:800px">
-			<h2><?php esc_html_e( '3. Elementor Header & Footer (optional)', 'brickpoint' ); ?></h2>
+			<h2><?php esc_html_e( '3. Elementor Page Designs', 'brickpoint' ); ?></h2>
+			<p><?php esc_html_e( 'Builds the full Home, About, Products, SS7 Bricks, Projects, Locations and Contact designs as native, editable Elementor content. Run this after import (or anytime to restore the designs — your Elementor edits on those pages will be overwritten).', 'brickpoint' ); ?></p>
+			<form method="post">
+				<?php wp_nonce_field( 'brickpoint_import' ); ?>
+				<p><button type="submit" name="brickpoint_build_elementor" value="1" class="button button-secondary button-large"><?php esc_html_e( 'Build Elementor Page Designs', 'brickpoint' ); ?></button></p>
+			</form>
+		</div>
+		<div class="card" style="max-width:800px">
+			<h2><?php esc_html_e( '4. Elementor Header & Footer (optional)', 'brickpoint' ); ?></h2>
 			<p><?php esc_html_e( 'The theme ships with pixel-faithful fallback header/footer. To manage them visually, go to Elementor → Theme Builder and create Header/Footer templates — they automatically override the theme fallback. Elementor Pro is required for Theme Builder locations; without it the fallback header/footer remain fully functional.', 'brickpoint' ); ?></p>
 		</div>
 	</div>

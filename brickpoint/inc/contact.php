@@ -34,6 +34,18 @@ function brickpoint_register_message_cpt() {
 
 add_action( 'wp_ajax_brickpoint_contact', 'brickpoint_handle_contact' );
 add_action( 'wp_ajax_nopriv_brickpoint_contact', 'brickpoint_handle_contact' );
+add_shortcode( 'brickpoint_contact_form', 'brickpoint_contact_form_shortcode' );
+
+/**
+ * Contact form shortcode (used by the Elementor Contact page design).
+ *
+ * @return string
+ */
+function brickpoint_contact_form_shortcode() {
+	ob_start();
+	get_template_part( 'template-parts/content/contact-form' );
+	return ob_get_clean();
+}
 /**
  * Handle contact submission.
  */

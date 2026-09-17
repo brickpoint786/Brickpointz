@@ -22,3 +22,4 @@ require BRICKPOINT_DIR . '/inc/elementor.php';
 require BRICKPOINT_DIR . '/inc/woocommerce.php';
 require BRICKPOINT_DIR . '/inc/contact.php';
 require BRICKPOINT_DIR . '/inc/demo-import.php';
+require BRICKPOINT_DIR . '/inc/elementor/demo-content.php';
