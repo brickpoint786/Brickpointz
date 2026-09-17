@@ -213,3 +213,37 @@ function brickpoint_plugin_notice() {
 	echo '</p></div>';
 }
 add_action( 'admin_notices', 'brickpoint_plugin_notice' );
+
+/**
+ * Point editors of Elementor-built content to the right screen.
+ * The block editor shows an empty canvas for Elementor pages (content lives
+ * in Elementor data), which looks broken — show a clear way out.
+ */
+function brickpoint_built_with_elementor_notice() {
+	if ( ! function_exists( 'get_current_screen' ) ) {
+		return;
+	}
+	$screen = get_current_screen();
+	if ( ! $screen || 'post' !== $screen->base ) {
+		return;
+	}
+	$post_id = isset( $_GET['post'] ) ? (int) $_GET['post'] : 0;
+	if ( ! $post_id ) {
+		return;
+	}
+	if ( 'builder' !== get_post_meta( $post_id, '_elementor_edit_mode', true ) ) {
+		return;
+	}
+	if ( ! current_user_can( 'edit_post', $post_id ) ) {
+		return;
+	}
+	$edit_url = admin_url( 'post.php?post=' . $post_id . '&action=elementor' );
+	echo '<div class="notice notice-info"><p><strong>';
+	esc_html_e( 'This page is built with Elementor.', 'brickpoint' );
+	echo '</strong> ';
+	esc_html_e( 'The block editor below is intentionally empty — all content is edited visually.', 'brickpoint' );
+	echo ' <a class="button button-primary button-small" style="margin-left:8px" href="' . esc_url( $edit_url ) . '">';
+	esc_html_e( 'Edit with Elementor', 'brickpoint' );
+	echo '</a></p></div>';
+}
+add_action( 'admin_notices', 'brickpoint_built_with_elementor_notice' );

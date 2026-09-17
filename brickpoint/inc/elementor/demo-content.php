@@ -159,9 +159,9 @@ function bp_w_image( $file, $radius = 16 ) {
 	return bp_el_widget(
 		'image',
 		array(
-			'image'         => array( 'url' => $url, 'id' => $att ? $att : '' ),
-			'align'         => 'center',
-			'border_radius' => array( 'unit' => 'px', 'top' => $radius, 'right' => $radius, 'bottom' => $radius, 'left' => $radius, 'isLinked' => true ),
+			'image'               => array( 'url' => $url, 'id' => $att ? $att : '' ),
+			'align'               => 'center',
+			'image_border_radius' => array( 'unit' => 'px', 'top' => $radius, 'right' => $radius, 'bottom' => $radius, 'left' => $radius, 'isLinked' => true ),
 		)
 	);
 }
@@ -1465,8 +1465,15 @@ function brickpoint_design_targets() {
  */
 function brickpoint_page_has_elementor( $post_id ) {
 	$mode = get_post_meta( $post_id, '_elementor_edit_mode', true );
+	if ( 'builder' !== $mode ) {
+		return false;
+	}
 	$data = get_post_meta( $post_id, '_elementor_data', true );
-	return ( 'builder' === $mode && ! empty( $data ) && '[]' !== $data );
+	if ( ! is_string( $data ) || '' === trim( $data ) || '[]' === trim( $data ) ) {
+		return false;
+	}
+	$decoded = json_decode( $data, true );
+	return ( is_array( $decoded ) && ! empty( $decoded ) );
 }
 
 /**
@@ -1508,8 +1515,90 @@ function brickpoint_apply_elementor_designs( $force = false ) {
 }
 
 /**
- * Auto-apply missing Elementor designs (runs once per designs version).
- * Fills only pages WITHOUT Elementor content — user edits are never touched.
+ * Recursively normalize Elementor elements: drop invalid nodes, guarantee
+ * unique ids, and fill required keys. Content/settings are preserved —
+ * this only repairs the envelope the editor needs to load the canvas.
+ *
+ * @param array $elements Raw elements.
+ * @param array $seen     Seen ids (by reference).
+ * @return array Clean elements.
+ */
+function brickpoint_sanitize_el_elements( $elements, &$seen ) {
+	$out = array();
+	foreach ( (array) $elements as $el ) {
+		if ( ! is_array( $el ) || empty( $el['elType'] ) ) {
+			continue;
+		}
+		if ( ! in_array( $el['elType'], array( 'section', 'column', 'widget' ), true ) ) {
+			continue;
+		}
+		if ( 'widget' === $el['elType'] && empty( $el['widgetType'] ) ) {
+			continue;
+		}
+		$id = isset( $el['id'] ) ? (string) $el['id'] : '';
+		if ( '' === $id || isset( $seen[ $id ] ) ) {
+			$id = bp_el_id();
+		}
+		$seen[ $id ] = true;
+		$el['id']    = $id;
+		if ( ! isset( $el['settings'] ) || ! is_array( $el['settings'] ) ) {
+			$el['settings'] = array();
+		}
+		$children       = ( isset( $el['elements'] ) && is_array( $el['elements'] ) ) ? $el['elements'] : array();
+		$el['elements'] = brickpoint_sanitize_el_elements( $children, $seen );
+		if ( ( 'section' === $el['elType'] || 'column' === $el['elType'] ) && ! array_key_exists( 'isInner', $el ) ) {
+			$el['isInner'] = false;
+		}
+		$out[] = $el;
+	}
+	return $out;
+}
+
+/**
+ * Repair a page's Elementor data envelope (normalize structure, refresh
+ * builder metas, drop stale generated CSS + autosaves that can present a
+ * stale/empty canvas in the editor). Page content is never changed.
+ *
+ * @param int $post_id Post ID.
+ * @return bool Whether a repair was applied.
+ */
+function brickpoint_repair_elementor_data( $post_id ) {
+	$raw = get_post_meta( $post_id, '_elementor_data', true );
+	if ( ! is_string( $raw ) || '' === trim( $raw ) ) {
+		return false;
+	}
+	$data = json_decode( $raw, true );
+	if ( ! is_array( $data ) || empty( $data ) ) {
+		return false;
+	}
+	$seen  = array();
+	$clean = brickpoint_sanitize_el_elements( $data, $seen );
+	if ( empty( $clean ) ) {
+		return false;
+	}
+	update_post_meta( $post_id, '_elementor_data', wp_slash( wp_json_encode( $clean ) ) );
+	update_post_meta( $post_id, '_elementor_edit_mode', 'builder' );
+	update_post_meta( $post_id, '_elementor_template_type', 'wp-page' );
+	if ( defined( 'ELEMENTOR_VERSION' ) ) {
+		update_post_meta( $post_id, '_elementor_version', ELEMENTOR_VERSION );
+	}
+	// Force Elementor to regenerate its CSS files for this page.
+	delete_post_meta( $post_id, '_elementor_css' );
+	// Remove autosaves (e.g. empty ones created by the block editor) so the
+	// Elementor editor always opens the real published builder data.
+	if ( function_exists( 'wp_get_post_autosave' ) ) {
+		$autosave = wp_get_post_autosave( $post_id );
+		if ( $autosave && isset( $autosave->ID ) ) {
+			wp_delete_post( $autosave->ID, true );
+		}
+	}
+	return true;
+}
+
+/**
+ * Auto-apply missing Elementor designs + repair existing ones (runs once
+ * per designs version). Missing pages get their demo design; existing pages
+ * keep their content and only get a structural repair + cache refresh.
  */
 function brickpoint_maybe_auto_apply_designs() {
 	if ( ! current_user_can( 'manage_options' ) ) {
@@ -1521,33 +1610,61 @@ function brickpoint_maybe_auto_apply_designs() {
 	if ( get_option( 'brickpoint_el_designs_auto', '' ) === BRICKPOINT_EL_DESIGNS_VERSION ) {
 		return;
 	}
-	$count = brickpoint_apply_elementor_designs( false );
+	$count    = brickpoint_apply_elementor_designs( false );
+	$repaired = 0;
+	foreach ( brickpoint_design_targets() as $post_id => $info ) {
+		if ( brickpoint_page_has_elementor( $post_id ) && brickpoint_repair_elementor_data( $post_id ) ) {
+			$repaired++;
+		}
+	}
+	if ( class_exists( '\\Elementor\\Plugin' ) && isset( \\Elementor\\Plugin::$instance->files_manager ) ) {
+		\\Elementor\\Plugin::$instance->files_manager->clear_cache();
+	}
 	update_option( 'brickpoint_el_designs_auto', BRICKPOINT_EL_DESIGNS_VERSION );
-	if ( $count > 0 ) {
-		set_transient( 'brickpoint_el_built', $count, 120 );
+	if ( $count > 0 || $repaired > 0 ) {
+		set_transient( 'brickpoint_el_built', array( 'built' => $count, 'repaired' => $repaired ), 180 );
 	}
 }
 add_action( 'admin_init', 'brickpoint_maybe_auto_apply_designs' );
 
 /**
- * Success notice after auto-apply.
+ * Success notice after auto-apply / repair.
  */
 function brickpoint_el_built_notice() {
 	if ( ! current_user_can( 'manage_options' ) ) {
 		return;
 	}
-	$count = get_transient( 'brickpoint_el_built' );
-	if ( ! $count ) {
+	$info = get_transient( 'brickpoint_el_built' );
+	if ( ! $info ) {
 		return;
 	}
 	delete_transient( 'brickpoint_el_built' );
+	$built    = isset( $info['built'] ) ? (int) $info['built'] : 0;
+	$repaired = isset( $info['repaired'] ) ? (int) $info['repaired'] : 0;
 	echo '<div class="notice notice-success is-dismissible"><p>';
-	printf(
-		/* translators: 1: count, 2: pages link */
-		esc_html__( 'BrickPoint applied editable Elementor designs to %1$d pages. Open any page with %2$s to edit it visually.', 'brickpoint' ),
-		esc_html( $count ),
-		'<a href="' . esc_url( admin_url( 'edit.php?post_type=page' ) ) . '">' . esc_html__( 'Edit with Elementor', 'brickpoint' ) . '</a>'
-	);
+	if ( $built > 0 && $repaired > 0 ) {
+		printf(
+			/* translators: 1: built, 2: repaired, 3: pages link */
+			esc_html__( 'BrickPoint applied editable Elementor designs to %1$d pages and refreshed %2$d pages. If an editor tab was already open, close it and reopen via %3$s.', 'brickpoint' ),
+			esc_html( $built ),
+			esc_html( $repaired ),
+			'<a href="' . esc_url( admin_url( 'edit.php?post_type=page' ) ) . '">' . esc_html__( 'Edit with Elementor', 'brickpoint' ) . '</a>'
+		);
+	} elseif ( $built > 0 ) {
+		printf(
+			/* translators: 1: count, 2: pages link */
+			esc_html__( 'BrickPoint applied editable Elementor designs to %1$d pages. Open any page with %2$s to edit it visually.', 'brickpoint' ),
+			esc_html( $built ),
+			'<a href="' . esc_url( admin_url( 'edit.php?post_type=page' ) ) . '">' . esc_html__( 'Edit with Elementor', 'brickpoint' ) . '</a>'
+		);
+	} else {
+		printf(
+			/* translators: 1: repaired, 2: pages link */
+			esc_html__( 'BrickPoint refreshed Elementor data on %1$d pages. If an editor tab was already open, close it completely and reopen it via %2$s — do not just reload a tab opened earlier.', 'brickpoint' ),
+			esc_html( $repaired ),
+			'<a href="' . esc_url( admin_url( 'edit.php?post_type=page' ) ) . '">' . esc_html__( 'Pages → Edit with Elementor', 'brickpoint' ) . '</a>'
+		);
+	}
 	echo '</p></div>';
 }
 add_action( 'admin_notices', 'brickpoint_el_built_notice' );

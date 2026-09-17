@@ -37,6 +37,20 @@ function brickpoint_setup_page() {
 		$result  = brickpoint_run_import();
 		$message = $result ? __( 'Demo content imported successfully.', 'brickpoint' ) : __( 'Import finished with warnings — see content lists to verify.', 'brickpoint' );
 	}
+	if ( isset( $_POST['brickpoint_build_elementor'] ) && check_admin_referer( 'brickpoint_import' ) && function_exists( 'brickpoint_apply_elementor_designs' ) ) {
+		$count   = brickpoint_apply_elementor_designs( true );
+		$message = sprintf( __( 'Elementor page designs rebuilt on %d pages. Close any open editor tabs completely and reopen them via Edit with Elementor.', 'brickpoint' ), $count );
+	}
+	if ( isset( $_POST['brickpoint_launch_store'] ) && check_admin_referer( 'brickpoint_import' ) ) {
+		update_option( 'woocommerce_coming_soon', 'no' );
+		update_option( 'woocommerce_store_pages_only', 'no' );
+		$message = __( 'Store launched — shop, category and product pages are now visible to visitors.', 'brickpoint' );
+	}
+	if ( isset( $_POST['brickpoint_seed_woo'] ) && check_admin_referer( 'brickpoint_import' ) && function_exists( 'brickpoint_import_woo' ) ) {
+		brickpoint_import_woo();
+		update_option( 'brickpoint_woo_seeded', '1' );
+		$message = __( 'WooCommerce demo categories and starter products added (existing ones kept).', 'brickpoint' );
+	}
 	$has_elementor = brickpoint_has_elementor();
 	$has_woo       = class_exists( 'WooCommerce' );
 	?>
@@ -90,19 +104,47 @@ function brickpoint_setup_page() {
 							echo '<tr><td><strong>' . esc_html( $label ) . '</strong><br><code>' . esc_html( $slug ) . '</code></td>';
 							echo '<td>✔ ' . esc_html__( 'Yes', 'brickpoint' ) . '</td>';
 							echo '<td>' . ( $has ? '✔ <strong>' . esc_html__( 'Editable', 'brickpoint' ) . '</strong>' : '— ' . esc_html__( 'Missing', 'brickpoint' ) ) . '</td>';
-							echo '<td><a class="button button-small" href="' . esc_url( $edit ) . '">' . esc_html__( 'Edit with Elementor', 'brickpoint' ) . '</a></td></tr>';
+							$preview = add_query_arg( 'elementor-preview', $post_id, get_permalink( $post_id ) );
+						echo '<td><a class="button button-small" href="' . esc_url( $edit ) . '">' . esc_html__( 'Edit with Elementor', 'brickpoint' ) . '</a> ';
+						echo '<a class="button button-small" target="_blank" rel="noopener" href="' . esc_url( $preview ) . '">' . esc_html__( 'Preview Test', 'brickpoint' ) . '</a></td></tr>';
 						}
 					}
 					?>
 				</tbody>
 			</table>
+			<p><?php esc_html_e( 'If the editor ever opens with an empty canvas: close that editor tab completely and reopen it from the button above — a tab opened earlier keeps showing the old state. “Preview Test” opens exactly what Elementor sees: if the preview shows your content but the editor is empty, the tab is stale.', 'brickpoint' ); ?></p>
 			<form method="post">
 				<?php wp_nonce_field( 'brickpoint_import' ); ?>
 				<p><button type="submit" name="brickpoint_build_elementor" value="1" class="button button-secondary button-large"><?php esc_html_e( 'Rebuild Elementor Page Designs', 'brickpoint' ); ?></button></p>
 			</form>
 		</div>
 		<div class="card" style="max-width:800px">
-			<h2><?php esc_html_e( '4. Elementor Header & Footer (optional)', 'brickpoint' ); ?></h2>
+			<h2><?php esc_html_e( '4. WooCommerce Store Status', 'brickpoint' ); ?></h2>
+			<?php
+			$coming_soon = ( 'yes' === get_option( 'woocommerce_coming_soon', 'no' ) );
+			$prod_count  = ( $has_woo && function_exists( 'wc_get_products' ) ) ? count( wc_get_products( array( 'status' => 'publish', 'limit' => -1, 'return' => 'ids' ) ) ) : 0;
+			?>
+			<p>
+				<?php esc_html_e( 'Store visibility:', 'brickpoint' ); ?>
+				<strong><?php echo $coming_soon ? esc_html__( 'Coming soon (shop pages hidden from visitors)', 'brickpoint' ) : esc_html__( 'Live', 'brickpoint' ); ?></strong><br>
+				<?php esc_html_e( 'Published products:', 'brickpoint' ); ?> <strong><?php echo esc_html( $prod_count ); ?></strong>
+			</p>
+			<?php if ( $coming_soon || ( $has_woo && 0 === $prod_count ) ) : ?>
+			<form method="post">
+				<?php wp_nonce_field( 'brickpoint_import' ); ?>
+				<p>
+					<?php if ( $coming_soon ) : ?>
+						<button type="submit" name="brickpoint_launch_store" value="1" class="button button-primary"><?php esc_html_e( 'Launch Store (make shop visible)', 'brickpoint' ); ?></button>
+					<?php endif; ?>
+					<?php if ( $has_woo && 0 === $prod_count ) : ?>
+						<button type="submit" name="brickpoint_seed_woo" value="1" class="button button-secondary"><?php esc_html_e( 'Add Starter Products & Categories', 'brickpoint' ); ?></button>
+					<?php endif; ?>
+				</p>
+			</form>
+			<?php endif; ?>
+		</div>
+		<div class="card" style="max-width:800px">
+			<h2><?php esc_html_e( '5. Elementor Header & Footer (optional)', 'brickpoint' ); ?></h2>
 			<p><?php esc_html_e( 'The theme ships with pixel-faithful fallback header/footer. To manage them visually, go to Elementor → Theme Builder and create Header/Footer templates — they automatically override the theme fallback. Elementor Pro is required for Theme Builder locations; without it the fallback header/footer remain fully functional.', 'brickpoint' ); ?></p>
 		</div>
 	</div>
@@ -165,6 +207,9 @@ function brickpoint_run_import() {
 	brickpoint_import_posts();
 	if ( class_exists( 'WooCommerce' ) ) {
 		brickpoint_import_woo();
+	}
+	if ( function_exists( 'brickpoint_apply_elementor_designs' ) ) {
+		brickpoint_apply_elementor_designs( false );
 	}
 	flush_rewrite_rules();
 	return true;
@@ -692,3 +737,27 @@ function brickpoint_import_woo() {
 		}
 	}
 }
+
+/**
+ * One-time seeding of Woo demo data when WooCommerce was activated AFTER the
+ * demo import ran (a completely empty store only — never touches real stores).
+ */
+function brickpoint_maybe_seed_woo() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+	if ( ! class_exists( 'WooCommerce' ) || ! function_exists( 'wc_get_products' ) ) {
+		return;
+	}
+	if ( '1' === get_option( 'brickpoint_woo_seeded', '' ) ) {
+		return;
+	}
+	$ids = wc_get_products( array( 'status' => 'publish', 'limit' => 1, 'return' => 'ids' ) );
+	if ( ! empty( $ids ) ) {
+		update_option( 'brickpoint_woo_seeded', '1' );
+		return;
+	}
+	brickpoint_import_woo();
+	update_option( 'brickpoint_woo_seeded', '1' );
+}
+add_action( 'admin_init', 'brickpoint_maybe_seed_woo' );
