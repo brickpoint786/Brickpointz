@@ -38,6 +38,11 @@ function brickpoint_has_elementor_pro() {
 	return defined( 'ELEMENTOR_PRO_VERSION' );
 }
 
+// Register widgets + category at load time (must be registered before
+// Elementor fires elementor/widgets/register — never nested inside init).
+add_action( 'elementor/widgets/register', 'brickpoint_register_widgets' );
+add_action( 'elementor/elements/categories_registered', 'brickpoint_widget_category' );
+
 add_action( 'elementor/init', 'brickpoint_elementor_init' );
 /**
  * Elementor init: CPT support + category.

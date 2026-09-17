@@ -1411,24 +1411,67 @@ function bp_design_contact() {
  * ------------------------------------------------------------------------- */
 
 /**
- * Map of page slug => design builder.
+ * Map of page slug => [label, design builder].
  *
  * @return array
  */
 function bp_elementor_design_map() {
 	return array(
-		'home'      => 'bp_design_home',
-		'about'     => 'bp_design_about',
-		'products'  => 'bp_design_products',
-		'ss7-bricks' => 'bp_design_ss7',
-		'projects'  => 'bp_design_projects',
-		'locations' => 'bp_design_locations',
-		'contact'   => 'bp_design_contact',
+		'home'       => array( __( 'Home', 'brickpoint' ), 'bp_design_home' ),
+		'about'      => array( __( 'About Us', 'brickpoint' ), 'bp_design_about' ),
+		'products'   => array( __( 'Products', 'brickpoint' ), 'bp_design_products' ),
+		'ss7-bricks' => array( __( 'SS7 Bricks', 'brickpoint' ), 'bp_design_ss7' ),
+		'projects'   => array( __( 'Projects', 'brickpoint' ), 'bp_design_projects' ),
+		'locations'  => array( __( 'Locations', 'brickpoint' ), 'bp_design_locations' ),
+		'contact'    => array( __( 'Contact Us', 'brickpoint' ), 'bp_design_contact' ),
 	);
 }
 
 /**
+ * Resolve design targets to actual page IDs.
+ *
+ * Matches pages by slug, plus the assigned front page (whatever its slug is)
+ * so the Home design always lands on the real homepage.
+ *
+ * @return array post_id => [label, builder, slug]
+ */
+function brickpoint_design_targets() {
+	$targets = array();
+	$found_home = false;
+	foreach ( bp_elementor_design_map() as $slug => $info ) {
+		list( $label, $builder ) = $info;
+		$page = get_page_by_path( $slug );
+		if ( $page && 'page' === $page->post_type ) {
+			$targets[ $page->ID ] = array( $label, $builder, $slug );
+			if ( 'home' === $slug ) {
+				$found_home = true;
+			}
+		}
+	}
+	if ( ! $found_home ) {
+		$front_id = (int) get_option( 'page_on_front' );
+		if ( $front_id && 'page' === get_post_type( $front_id ) && ! isset( $targets[ $front_id ] ) ) {
+			$targets[ $front_id ] = array( __( 'Home', 'brickpoint' ), 'bp_design_home', get_post_field( 'post_name', $front_id ) );
+		}
+	}
+	return $targets;
+}
+
+/**
+ * Whether a page already has Elementor builder content.
+ *
+ * @param int $post_id Post ID.
+ * @return bool
+ */
+function brickpoint_page_has_elementor( $post_id ) {
+	$mode = get_post_meta( $post_id, '_elementor_edit_mode', true );
+	$data = get_post_meta( $post_id, '_elementor_data', true );
+	return ( 'builder' === $mode && ! empty( $data ) && '[]' !== $data );
+}
+
+/**
  * Apply Elementor designs to demo pages.
+ * Never overwrites existing Elementor content unless $force is true.
  *
  * @param bool $force Rebuild even if page already has Elementor data.
  * @return int Number of pages built.
@@ -1438,25 +1481,24 @@ function brickpoint_apply_elementor_designs( $force = false ) {
 		return 0;
 	}
 	$count = 0;
-	foreach ( bp_elementor_design_map() as $slug => $builder ) {
-		$page = get_page_by_path( $slug );
-		if ( ! $page || ! function_exists( $builder ) ) {
+	foreach ( brickpoint_design_targets() as $post_id => $info ) {
+		list( $label, $builder, $slug ) = $info;
+		if ( ! function_exists( $builder ) ) {
 			continue;
 		}
-		$existing = get_post_meta( $page->ID, '_elementor_data', true );
-		if ( ! $force && ! empty( $existing ) && '[]' !== $existing ) {
+		if ( ! $force && brickpoint_page_has_elementor( $post_id ) ) {
 			continue;
 		}
 		$data = call_user_func( $builder );
 		if ( empty( $data ) ) {
 			continue;
 		}
-		update_post_meta( $page->ID, '_elementor_data', wp_slash( wp_json_encode( $data ) ) );
-		update_post_meta( $page->ID, '_elementor_edit_mode', 'builder' );
-		update_post_meta( $page->ID, '_elementor_template_type', 'wp-page' );
-		update_post_meta( $page->ID, '_elementor_version', defined( 'ELEMENTOR_VERSION' ) ? ELEMENTOR_VERSION : '3.0.0' );
+		update_post_meta( $post_id, '_elementor_data', wp_slash( wp_json_encode( $data ) ) );
+		update_post_meta( $post_id, '_elementor_edit_mode', 'builder' );
+		update_post_meta( $post_id, '_elementor_template_type', 'wp-page' );
+		update_post_meta( $post_id, '_elementor_version', defined( 'ELEMENTOR_VERSION' ) ? ELEMENTOR_VERSION : '3.0.0' );
 		// Keep default page layout so theme header/footer render.
-		delete_post_meta( $page->ID, '_elementor_page_settings' );
+		delete_post_meta( $post_id, '_elementor_page_settings' );
 		$count++;
 	}
 	if ( $count && class_exists( '\Elementor\Plugin' ) && isset( \Elementor\Plugin::$instance->files_manager ) ) {
@@ -1464,3 +1506,48 @@ function brickpoint_apply_elementor_designs( $force = false ) {
 	}
 	return $count;
 }
+
+/**
+ * Auto-apply missing Elementor designs (runs once per designs version).
+ * Fills only pages WITHOUT Elementor content — user edits are never touched.
+ */
+function brickpoint_maybe_auto_apply_designs() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+	if ( ! brickpoint_has_elementor() ) {
+		return;
+	}
+	if ( get_option( 'brickpoint_el_designs_auto', '' ) === BRICKPOINT_EL_DESIGNS_VERSION ) {
+		return;
+	}
+	$count = brickpoint_apply_elementor_designs( false );
+	update_option( 'brickpoint_el_designs_auto', BRICKPOINT_EL_DESIGNS_VERSION );
+	if ( $count > 0 ) {
+		set_transient( 'brickpoint_el_built', $count, 120 );
+	}
+}
+add_action( 'admin_init', 'brickpoint_maybe_auto_apply_designs' );
+
+/**
+ * Success notice after auto-apply.
+ */
+function brickpoint_el_built_notice() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+	$count = get_transient( 'brickpoint_el_built' );
+	if ( ! $count ) {
+		return;
+	}
+	delete_transient( 'brickpoint_el_built' );
+	echo '<div class="notice notice-success is-dismissible"><p>';
+	printf(
+		/* translators: 1: count, 2: pages link */
+		esc_html__( 'BrickPoint applied editable Elementor designs to %1$d pages. Open any page with %2$s to edit it visually.', 'brickpoint' ),
+		esc_html( $count ),
+		'<a href="' . esc_url( admin_url( 'edit.php?post_type=page' ) ) . '">' . esc_html__( 'Edit with Elementor', 'brickpoint' ) . '</a>'
+	);
+	echo '</p></div>';
+}
+add_action( 'admin_notices', 'brickpoint_el_built_notice' );

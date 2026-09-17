@@ -9,7 +9,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'BRICKPOINT_VERSION', '1.0.0' );
+define( 'BRICKPOINT_VERSION', '1.0.1' );
+define( 'BRICKPOINT_EL_DESIGNS_VERSION', '1.0.0' );
 define( 'BRICKPOINT_DIR', get_template_directory() );
 define( 'BRICKPOINT_URI', get_template_directory_uri() );
 

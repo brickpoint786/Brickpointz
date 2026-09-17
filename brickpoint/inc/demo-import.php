@@ -66,10 +66,39 @@ function brickpoint_setup_page() {
 		</div>
 		<div class="card" style="max-width:800px">
 			<h2><?php esc_html_e( '3. Elementor Page Designs', 'brickpoint' ); ?></h2>
-			<p><?php esc_html_e( 'Builds the full Home, About, Products, SS7 Bricks, Projects, Locations and Contact designs as native, editable Elementor content. Run this after import (or anytime to restore the designs — your Elementor edits on those pages will be overwritten).', 'brickpoint' ); ?></p>
+			<p><?php esc_html_e( 'The full Home, About, Products, SS7 Bricks, Projects, Locations and Contact designs are built as native, editable Elementor content — applied automatically. Use the button below only to restore them (your Elementor edits on those pages will be overwritten).', 'brickpoint' ); ?></p>
+			<table class="widefat striped" style="margin-bottom:12px">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'Page', 'brickpoint' ); ?></th>
+						<th><?php esc_html_e( 'Found', 'brickpoint' ); ?></th>
+						<th><?php esc_html_e( 'Elementor Content', 'brickpoint' ); ?></th>
+						<th><?php esc_html_e( 'Action', 'brickpoint' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php
+					if ( function_exists( 'brickpoint_design_targets' ) ) {
+						$targets = brickpoint_design_targets();
+						if ( ! $targets ) {
+							echo '<tr><td colspan="4">' . esc_html__( 'No demo pages found yet — run the import above first.', 'brickpoint' ) . '</td></tr>';
+						}
+						foreach ( $targets as $post_id => $info ) {
+							list( $label, $builder, $slug ) = $info;
+							$has  = function_exists( 'brickpoint_page_has_elementor' ) && brickpoint_page_has_elementor( $post_id );
+							$edit = admin_url( 'post.php?post=' . $post_id . '&action=elementor' );
+							echo '<tr><td><strong>' . esc_html( $label ) . '</strong><br><code>' . esc_html( $slug ) . '</code></td>';
+							echo '<td>✔ ' . esc_html__( 'Yes', 'brickpoint' ) . '</td>';
+							echo '<td>' . ( $has ? '✔ <strong>' . esc_html__( 'Editable', 'brickpoint' ) . '</strong>' : '— ' . esc_html__( 'Missing', 'brickpoint' ) ) . '</td>';
+							echo '<td><a class="button button-small" href="' . esc_url( $edit ) . '">' . esc_html__( 'Edit with Elementor', 'brickpoint' ) . '</a></td></tr>';
+						}
+					}
+					?>
+				</tbody>
+			</table>
 			<form method="post">
 				<?php wp_nonce_field( 'brickpoint_import' ); ?>
-				<p><button type="submit" name="brickpoint_build_elementor" value="1" class="button button-secondary button-large"><?php esc_html_e( 'Build Elementor Page Designs', 'brickpoint' ); ?></button></p>
+				<p><button type="submit" name="brickpoint_build_elementor" value="1" class="button button-secondary button-large"><?php esc_html_e( 'Rebuild Elementor Page Designs', 'brickpoint' ); ?></button></p>
 			</form>
 		</div>
 		<div class="card" style="max-width:800px">
